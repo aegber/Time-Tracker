@@ -4,11 +4,16 @@ import jwt
 import datetime
 import hashlib
 
-# Simulated database
-users_db = {}
-utilization_db = {}
+# Secret key for JWT
+SECRET_KEY = "mysecret"
 
-SECRET_KEY = "your_secret_key"
+# Initialize session state
+if "users" not in st.session_state:
+    st.session_state["users"] = {}
+if "utilization" not in st.session_state:
+    st.session_state["utilization"] = []
+if "token" not in st.session_state:
+    st.session_state["token"] = None
 
 # Helper functions
 def hash_password(password):
@@ -28,69 +33,68 @@ def verify_token(token):
     except jwt.ExpiredSignatureError:
         return None
 
+def signup():
+    st.subheader("Sign Up")
+    username = st.text_input("Username", key="signup_user")
+    password = st.text_input("Password", type="password", key="signup_pass")
+    if st.button("Create Account"):
+        if username in st.session_state["users"]:
+            st.error("Username already exists.")
+        else:
+            st.session_state["users"][username] = hash_password(password)
+            st.success("Account created successfully.")
+
 def login():
     st.subheader("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    username = st.text_input("Username", key="login_user")
+    password = st.text_input("Password", type="password", key="login_pass")
     if st.button("Login"):
-        if username in users_db and users_db[username] == hash_password(password):
+        hashed = hash_password(password)
+        if st.session_state["users"].get(username) == hashed:
             st.session_state["token"] = create_token(username)
-            st.success("Logged in successfully!")
+            st.success("Logged in successfully.")
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid credentials.")
 
-def signup():
-    st.subheader("Signup")
-    username = st.text_input("New Username")
-    password = st.text_input("New Password", type="password")
-    if st.button("Signup"):
-        if username in users_db:
-            st.error("Username already exists")
-        else:
-            users_db[username] = hash_password(password)
-            st.success("User created successfully")
-
-def utilization_entry(username):
+def utilization_form(username):
     st.subheader("Enter Weekly Utilization")
-    week = st.date_input("Week Start Date")
-    project_entries = {}
-    for i in range(3):
-        project = st.text_input(f"Project {i+1} Name", key=f"proj_{i}")
-        percent = st.slider(f"{project} % Time", 0, 100, 0, key=f"perc_{i}")
-        if project:
-            project_entries[project] = percent
+    week = st.date_input("Week of")
+    projects = st.text_area("Enter projects and % (e.g., Project A 20%, Project B 30%)")
     if st.button("Submit Utilization"):
-        utilization_db.setdefault(username, []).append({"week": week, "projects": project_entries})
-        st.success("Utilization submitted")
+        st.session_state["utilization"].append({
+            "username": username,
+            "week": str(week),
+            "projects": projects
+        })
+        st.success("Utilization submitted.")
 
 def dashboard():
     st.subheader("Dashboard")
-    for user, entries in utilization_db.items():
-        st.write(f"### {user}")
-        for entry in entries:
-            total = sum(entry["projects"].values())
-            status = "Underloaded" if total < 80 else "Overloaded" if total > 100 else "Balanced"
-            st.write(f"Week: {entry['week']}, Total: {total}%, Status: {status}")
+    user_filter = st.selectbox("Filter by User", ["All"] + list(st.session_state["users"].keys()))
+    week_filter = st.text_input("Filter by Week (YYYY-MM-DD)")
+
+    for entry in st.session_state["utilization"]:
+        if (user_filter == "All" or entry["username"] == user_filter) and (week_filter == "" or entry["week"] == week_filter):
+            st.write(f"**{entry['username']}** - Week: {entry['week']}")
             st.write(entry["projects"])
 
 # Main app
 st.title("User Utilization Tracker")
 
-if "token" not in st.session_state:
-    option = st.radio("Choose Action", ["Login", "Signup"])
-    if option == "Login":
+if st.session_state["token"]:
+    user = verify_token(st.session_state["token"])
+    if user:
+        st.sidebar.write(f"Logged in as: {user}")
+        if st.sidebar.button("Logout"):
+            st.session_state["token"] = None
+        utilization_form(user)
+        dashboard()
+    else:
+        st.session_state["token"] = None
+        st.error("Session expired. Please log in again.")
+else:
+    auth_choice = st.radio("Choose Action", ["Login", "Sign Up"])
+    if auth_choice == "Login":
         login()
     else:
         signup()
-else:
-    username = verify_token(st.session_state["token"])
-    if username:
-        st.sidebar.write(f"Logged in as {username}")
-        page = st.sidebar.selectbox("Navigate", ["Enter Utilization", "Dashboard"])
-        if page == "Enter Utilization":
-            utilization_entry(username)
-        else:
-            dashboard()
-    else:
-        st.error("Session expired. Please login again.")
-        del st.session_state["token"]
